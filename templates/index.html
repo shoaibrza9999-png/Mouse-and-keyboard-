@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Wireless Mouse & Keyboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #121212;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden; /* Prevent pull-to-refresh and normal scrolling */
+        }
+
+        #header {
+            padding: 10px;
+            text-align: center;
+            background-color: #1e1e1e;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        #keyboard-input {
+            width: 150px;
+            padding: 8px;
+            background-color: #333;
+            border: 1px solid #555;
+            color: white;
+            border-radius: 4px;
+        }
+
+        #trackpad {
+            flex-grow: 1;
+            background-color: #222;
+            touch-action: none; /* Crucial for preventing browser handling of touches */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 24px;
+            color: #555;
+            user-select: none;
+        }
+
+        #buttons {
+            display: flex;
+            height: 80px;
+            background-color: #1e1e1e;
+            border-top: 1px solid #333;
+        }
+
+        .mouse-btn {
+            flex: 1;
+            border: none;
+            background-color: transparent;
+            color: white;
+            font-size: 18px;
+            border-right: 1px solid #333;
+            touch-action: manipulation;
+        }
+
+        .mouse-btn:last-child {
+            border-right: none;
+        }
+
+        .mouse-btn:active {
+            background-color: #333;
+        }
+
+        #scroll-area {
+            width: 50px;
+            background-color: #2a2a2a;
+            border-left: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            touch-action: none;
+        }
+
+        .scroll-text {
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            color: #555;
+            user-select: none;
+        }
+
+        #main-area {
+            display: flex;
+            flex-grow: 1;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <div>Remote Mouse</div>
+        <input type="text" id="keyboard-input" placeholder="Type here..." autocomplete="off">
+    </div>
+
+    <div id="main-area">
+        <div id="trackpad">
+            TRACKPAD
+        </div>
+        <div id="scroll-area">
+            <span class="scroll-text">SCROLL</span>
+        </div>
+    </div>
+
+    <div id="buttons">
+        <button class="mouse-btn" id="left-click">Left Click</button>
+        <button class="mouse-btn" id="middle-click">Mid</button>
+        <button class="mouse-btn" id="right-click">Right Click</button>
+    </div>
+
+    <script>
+        const socket = io();
+
+        // Trackpad logic
+        const trackpad = document.getElementById('trackpad');
+        let lastTouchX = null;
+        let lastTouchY = null;
+        let isMoving = false;
+
+        // Sensitivity multiplier
+        const SENSITIVITY = 1.5;
+
+        trackpad.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (e.touches.length === 1) {
+                lastTouchX = e.touches[0].clientX;
+                lastTouchY = e.touches[0].clientY;
+                isMoving = true;
+            }
+        }, { passive: false });
+
+        trackpad.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (isMoving && e.touches.length === 1) {
+                const currentX = e.touches[0].clientX;
+                const currentY = e.touches[0].clientY;
+
+                const dx = (currentX - lastTouchX) * SENSITIVITY;
+                const dy = (currentY - lastTouchY) * SENSITIVITY;
+
+                if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
+                    socket.emit('mouse_move', { dx: dx, dy: dy });
+                }
+
+                lastTouchX = currentX;
+                lastTouchY = currentY;
+            }
+        }, { passive: false });
+
+        trackpad.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            isMoving = false;
+            lastTouchX = null;
+            lastTouchY = null;
+        }, { passive: false });
+
+        // Tap to click
+        let lastTap = 0;
+        trackpad.addEventListener('touchend', (e) => {
+            const currentTime = new Date().getTime();
+            const tapLength = currentTime - lastTap;
+
+            // If it was a quick tap without much movement, treat as left click
+            if (tapLength < 250 && tapLength > 0) {
+                // Double tap? We can just send click.
+                // Single tap is also a click if we didn't move much (this needs a small movement threshold in a real app, but for simplicity we keep it simple)
+                socket.emit('mouse_click', { button: 'left', action: 'click' });
+            }
+            lastTap = currentTime;
+        });
+
+        // Scroll Area Logic
+        const scrollArea = document.getElementById('scroll-area');
+        let lastScrollY = null;
+        let isScrolling = false;
+
+        scrollArea.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (e.touches.length === 1) {
+                lastScrollY = e.touches[0].clientY;
+                isScrolling = true;
+            }
+        }, { passive: false });
+
+        scrollArea.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (isScrolling && e.touches.length === 1) {
+                const currentY = e.touches[0].clientY;
+                // For pynput scroll, positive dy is usually up, negative is down.
+                // Touch move down means we want to scroll up the page (natural scrolling).
+                // Or standard scrolling: move finger down -> content goes down -> scroll wheel down (negative).
+                const dy = lastScrollY - currentY;
+
+                // Scale it down so it's not too fast
+                const scrollSteps = dy * 0.1;
+
+                if (Math.abs(scrollSteps) >= 1) {
+                    socket.emit('mouse_scroll', { dx: 0, dy: Math.sign(scrollSteps) });
+                    lastScrollY = currentY;
+                }
+            }
+        }, { passive: false });
+
+        scrollArea.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            isScrolling = false;
+            lastScrollY = null;
+        }, { passive: false });
+
+        // Buttons
+        document.getElementById('left-click').addEventListener('click', () => {
+            socket.emit('mouse_click', { button: 'left', action: 'click' });
+        });
+
+        document.getElementById('middle-click').addEventListener('click', () => {
+            socket.emit('mouse_click', { button: 'middle', action: 'click' });
+        });
+
+        document.getElementById('right-click').addEventListener('click', () => {
+            socket.emit('mouse_click', { button: 'right', action: 'click' });
+        });
+
+        // Keyboard Input
+        const keyboardInput = document.getElementById('keyboard-input');
+
+        // Capture keydown to send special keys and normal keys
+        keyboardInput.addEventListener('keydown', (e) => {
+            // We want to send the exact key
+            socket.emit('key_press', { key: e.key });
+
+            // Prevent default for some keys to avoid navigating away, etc.
+            // But let input happen so mobile keyboard stays open
+            if (e.key === 'Enter' || e.key === 'Backspace') {
+                // Clear input so it doesn't get infinitely long
+                setTimeout(() => {
+                    keyboardInput.value = '';
+                }, 10);
+            }
+        });
+
+        // Clear input periodically to avoid huge strings
+        keyboardInput.addEventListener('input', (e) => {
+            if (keyboardInput.value.length > 20) {
+                keyboardInput.value = keyboardInput.value.substring(keyboardInput.value.length - 5);
+            }
+        });
+
+    </script>
+</body>
+</html>
