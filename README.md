@@ -1,51 +1,26 @@
-# Wireless Mouse & Keyboard App
+# Bluetooth Mouse App
 
-This application turns your mobile phone into a wireless trackpad and keyboard for your computer. It consists of a **Python Backend Server** running on your computer and an **Android Mobile App** running on your phone.
+This repository contains a standalone Android application (`MouseApp.apk`) that turns your phone into a Bluetooth mouse without needing *any* server application running on your computer.
 
-## How It Works: Architecture Overview
+It utilizes the Android `BluetoothHidDevice` API (available on Android 9/Pie and above) to broadcast a Bluetooth Human Interface Device profile, allowing it to natively emulate a Bluetooth mouse that can connect directly to PCs, Macs, tablets, or even other phones.
 
-The system is split into two main components that communicate with each other over either WiFi or Bluetooth:
+## Features
+- Complete standalone functionality - no Python server required!
+- Acts exactly like a physical Bluetooth mouse to the receiving computer.
+- Provides a large trackpad and left/right click buttons.
 
-### 1. The Python Backend Server (`app.py`)
-This script runs on the computer you want to control.
-- **Input Simulation:** It uses the `pynput` library to programmatically simulate physical mouse movements, clicks, scrolls, and keystrokes on the host operating system.
-- **Listeners:** The server simultaneously listens for incoming connections via two methods:
-  - **WiFi (WebSockets):** It runs a `Flask-SocketIO` web server (default port 5000) to receive low-latency JSON messages over a local network.
-  - **Bluetooth (RFCOMM):** It runs a background thread that establishes an `AF_BLUETOOTH` server socket (on port 1) to accept direct Bluetooth serial connections and parse incoming JSON data.
+## Requirements
+- An Android device running Android 9.0 (Pie) or higher.
+- A receiving computer or device that supports connecting to standard Bluetooth mice.
 
-### 2. The Android Mobile App (`MouseApp.apk`)
-The mobile application is built using **Apache Cordova**, which wraps an HTML/JS/CSS web application into a native Android APK.
-- **User Interface:** The interface provides a large trackpad area, a scroll wheel zone, left/middle/right click buttons, and a hidden input field to capture the mobile keyboard's keystrokes.
-- **Touch Events:** The JavaScript captures touch events (`touchstart`, `touchmove`, `touchend`) and calculates the delta (difference) in coordinates to determine the speed and direction of your finger swipe.
-- **Connection Logic:** Using the settings gear icon ⚙️, you can choose how to connect to the computer:
-  - **WiFi:** Uses `socket.io-client` to connect to the computer's IP address.
-  - **Bluetooth:** Uses the `cordova-plugin-bluetooth-serial` native plugin to list paired devices and establish a direct connection without relying on a local router.
-- **Data Transmission:** When a movement or click is detected, the app packages the data into a JSON payload (e.g., `{ "event": "mouse_move", "data": { "dx": 5, "dy": -2 } }`) and transmits it over the active connection.
+## Installation and Usage
+1. Transfer `MouseApp.apk` from this repository to your Android phone.
+2. Install it. (You may need to allow "Install from unknown sources" in settings).
+3. Open the "BT Mouse" app on your phone.
+4. If prompted, grant the required Bluetooth permissions and ensure Bluetooth is turned on.
+5. The app will say "Ready to pair! Go to your PC's Bluetooth settings and pair with this phone."
+6. On your computer, open Bluetooth settings and pair with your phone as you would a normal device.
+7. Once connected, use the trackpad and buttons to move your mouse!
 
-## Setup & Usage Instructions
-
-### Running the Computer Server
-1. Ensure you have Python installed.
-2. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Run the server script:
-   ```bash
-   python app.py
-   ```
-   *Note: Ensure your firewall allows traffic on port 5000 if using WiFi, and that your PC's Bluetooth is discoverable and paired if using Bluetooth.*
-
-### Installing the Mobile App
-1. Transfer the `MouseApp.apk` file located in the root of this repository to your Android phone.
-2. Open the file on your phone and choose to install it. (You may need to allow "Install unknown apps" in your Android settings).
-3. Open the "MouseApp" on your phone.
-
-### Connecting
-1. Tap the settings gear icon ⚙️ in the top right.
-2. **For WiFi:** Select the "WiFi / IP" tab, enter your computer's local IP address (e.g., `192.168.1.5`), and click "Connect WiFi".
-3. **For Bluetooth:**
-   - Ensure your phone is paired with your PC via your phone's standard Bluetooth settings.
-   - Select the "Bluetooth" tab inside the app.
-   - Click "Refresh Devices", select your PC from the dropdown list, and click "Connect Bluetooth".
-4. Once connected, swipe in the "TRACKPAD" area to move your mouse!
+## Note
+This replaced an older version of the app that required a Python backend over Wi-Fi. It is now a 100% native Android solution.

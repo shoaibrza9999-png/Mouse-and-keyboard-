@@ -1,1 +1,6 @@
 node_modules
+android-hid/.gradle/
+android-hid/app/build/
+/android-hid/.gradle
+/android-hid/app/build
+/android-hid/build
