@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- Allow everything for cordova for development purposes -->
+    <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval'; connect-src * 'unsafe-inline'; img-src * data: blob: 'unsafe-inline'; frame-src *; style-src * 'unsafe-inline';">
     <title>Wireless Mouse & Keyboard</title>
+    <!-- Use cordova.js if available -->
+    <script src="cordova.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
         body, html {
@@ -16,7 +20,7 @@
             color: white;
             display: flex;
             flex-direction: column;
-            overflow: hidden; /* Prevent pull-to-refresh and normal scrolling */
+            overflow: hidden;
         }
 
         #header {
@@ -29,8 +33,14 @@
             align-items: center;
         }
 
+        #title-area {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
         #keyboard-input {
-            width: 150px;
+            width: 120px;
             padding: 8px;
             background-color: #333;
             border: 1px solid #555;
@@ -41,7 +51,7 @@
         #trackpad {
             flex-grow: 1;
             background-color: #222;
-            touch-action: none; /* Crucial for preventing browser handling of touches */
+            touch-action: none;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -98,12 +108,132 @@
             flex-grow: 1;
             width: 100%;
         }
+
+        /* Modal Styles */
+        #settings-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background-color: #1e1e1e;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            width: 80%;
+            max-width: 300px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .modal-content input, .modal-content select {
+            padding: 10px;
+            background-color: #333;
+            border: 1px solid #555;
+            color: white;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+
+        .modal-content button {
+            padding: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        #settings-btn {
+            background: none;
+            border: 1px solid #555;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        #connection-status {
+            font-size: 10px;
+            color: red;
+        }
+        .connected { color: #4caf50 !important; }
+
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #555;
+            margin-bottom: 10px;
+        }
+        .tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            cursor: pointer;
+            color: #aaa;
+        }
+        .tab.active {
+            color: white;
+            border-bottom: 2px solid #007bff;
+        }
+
+        .tab-content {
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .tab-content.active {
+            display: flex;
+        }
     </style>
 </head>
 <body>
 
+    <div id="settings-modal">
+        <div class="modal-content">
+            <h3>Connection Settings</h3>
+
+            <div class="tabs">
+                <div class="tab active" id="tab-wifi">WiFi / IP</div>
+                <div class="tab" id="tab-bt">Bluetooth</div>
+            </div>
+
+            <!-- WiFi Content -->
+            <div id="content-wifi" class="tab-content active">
+                <p>Enter the IP address of your computer.</p>
+                <input type="text" id="server-ip" placeholder="e.g. 192.168.1.5">
+                <input type="number" id="server-port" placeholder="Port (default: 5000)" value="5000">
+                <button id="connect-wifi-btn">Connect WiFi</button>
+            </div>
+
+            <!-- Bluetooth Content -->
+            <div id="content-bt" class="tab-content">
+                <p>Select paired Bluetooth computer.</p>
+                <button id="refresh-bt-btn">Refresh Devices</button>
+                <select id="bt-devices">
+                    <option value="">No devices found</option>
+                </select>
+                <button id="connect-bt-btn">Connect Bluetooth</button>
+            </div>
+
+            <button id="close-modal-btn" style="background-color: #555;">Close</button>
+        </div>
+    </div>
+
     <div id="header">
-        <div>Remote Mouse</div>
+        <div id="title-area">
+            <div>Remote Mouse <div id="connection-status">Disconnected</div></div>
+            <button id="settings-btn">⚙️</button>
+        </div>
         <input type="text" id="keyboard-input" placeholder="Type here..." autocomplete="off">
     </div>
 
@@ -123,15 +253,206 @@
     </div>
 
     <script>
-        const socket = io();
+        let socket = null;
+        let connectionType = 'none'; // 'wifi' or 'bt'
 
-        // Trackpad logic
+        // Modal Logic
+        const modal = document.getElementById('settings-modal');
+        const settingsBtn = document.getElementById('settings-btn');
+        const closeModalBtn = document.getElementById('close-modal-btn');
+        const connectionStatus = document.getElementById('connection-status');
+
+        // Tabs logic
+        const tabWifi = document.getElementById('tab-wifi');
+        const tabBt = document.getElementById('tab-bt');
+        const contentWifi = document.getElementById('content-wifi');
+        const contentBt = document.getElementById('content-bt');
+
+        tabWifi.addEventListener('click', () => {
+            tabWifi.classList.add('active');
+            tabBt.classList.remove('active');
+            contentWifi.classList.add('active');
+            contentBt.classList.remove('active');
+        });
+
+        tabBt.addEventListener('click', () => {
+            tabBt.classList.add('active');
+            tabWifi.classList.remove('active');
+            contentBt.classList.add('active');
+            contentWifi.classList.remove('active');
+            refreshBluetoothDevices();
+        });
+
+        settingsBtn.addEventListener('click', () => {
+            modal.style.display = 'flex';
+        });
+
+        closeModalBtn.addEventListener('click', () => {
+            modal.style.display = 'none';
+        });
+
+        // ==========================================
+        // WiFi / IP Logic
+        // ==========================================
+        const serverIpInput = document.getElementById('server-ip');
+        const serverPortInput = document.getElementById('server-port');
+        const connectWifiBtn = document.getElementById('connect-wifi-btn');
+
+        const savedIp = localStorage.getItem('serverIp');
+        const savedPort = localStorage.getItem('serverPort') || '5000';
+        if (savedIp) {
+            serverIpInput.value = savedIp;
+            serverPortInput.value = savedPort;
+            connectToServer(savedIp, savedPort);
+        } else {
+            if (window.location.protocol === 'file:') {
+                modal.style.display = 'flex';
+            } else if (window.location.hostname) {
+                connectToServer(window.location.hostname, window.location.port || '80');
+            }
+        }
+
+        connectWifiBtn.addEventListener('click', () => {
+            const ip = serverIpInput.value.trim();
+            const port = serverPortInput.value.trim() || '5000';
+            if (ip) {
+                localStorage.setItem('serverIp', ip);
+                localStorage.setItem('serverPort', port);
+                connectToServer(ip, port);
+                modal.style.display = 'none';
+            }
+        });
+
+        function disconnectAll() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+            }
+            if (window.bluetoothSerial) {
+                bluetoothSerial.disconnect();
+            }
+            connectionType = 'none';
+            connectionStatus.innerText = 'Disconnected';
+            connectionStatus.className = '';
+        }
+
+        function connectToServer(ip, port) {
+            disconnectAll();
+            connectionType = 'wifi';
+
+            const url = `http://${ip}:${port}`;
+            connectionStatus.innerText = 'WiFi Connecting...';
+
+            socket = io(url, { transports: ['websocket', 'polling'] });
+
+            socket.on('connect', () => {
+                connectionStatus.innerText = 'WiFi Connected';
+                connectionStatus.className = 'connected';
+            });
+
+            socket.on('disconnect', () => {
+                connectionStatus.innerText = 'Disconnected';
+                connectionStatus.className = '';
+                connectionType = 'none';
+            });
+
+            socket.on('connect_error', () => {
+                connectionStatus.innerText = 'WiFi Error';
+                connectionStatus.className = '';
+            });
+        }
+
+        // ==========================================
+        // Bluetooth Logic
+        // ==========================================
+        const refreshBtBtn = document.getElementById('refresh-bt-btn');
+        const connectBtBtn = document.getElementById('connect-bt-btn');
+        const btDevicesSelect = document.getElementById('bt-devices');
+
+        document.addEventListener('deviceready', () => {
+            // Check if bluetooth is enabled
+            if (window.bluetoothSerial) {
+                bluetoothSerial.isEnabled(
+                    () => { console.log("Bluetooth is enabled"); },
+                    () => { console.log("Bluetooth is disabled"); }
+                );
+            }
+        }, false);
+
+        refreshBtBtn.addEventListener('click', refreshBluetoothDevices);
+
+        function refreshBluetoothDevices() {
+            btDevicesSelect.innerHTML = '<option value="">Scanning...</option>';
+            if (!window.bluetoothSerial) {
+                btDevicesSelect.innerHTML = '<option value="">Bluetooth not supported in browser</option>';
+                return;
+            }
+
+            bluetoothSerial.list(function(devices) {
+                btDevicesSelect.innerHTML = '';
+                if (devices.length === 0) {
+                    btDevicesSelect.innerHTML = '<option value="">No paired devices found</option>';
+                    return;
+                }
+
+                devices.forEach(function(device) {
+                    const option = document.createElement('option');
+                    option.value = device.address;
+                    option.text = device.name || device.address;
+                    btDevicesSelect.appendChild(option);
+                });
+            }, function(error) {
+                btDevicesSelect.innerHTML = '<option value="">Error listing devices</option>';
+                console.error("Bluetooth error:", error);
+            });
+        }
+
+        connectBtBtn.addEventListener('click', () => {
+            const address = btDevicesSelect.value;
+            if (!address) return;
+
+            disconnectAll();
+            connectionStatus.innerText = 'BT Connecting...';
+
+            if (window.bluetoothSerial) {
+                bluetoothSerial.connect(address,
+                    function() {
+                        connectionType = 'bt';
+                        connectionStatus.innerText = 'BT Connected';
+                        connectionStatus.className = 'connected';
+                        modal.style.display = 'none';
+                    },
+                    function(error) {
+                        connectionType = 'none';
+                        connectionStatus.innerText = 'BT Error';
+                        connectionStatus.className = '';
+                        console.error("Bluetooth connection error:", error);
+                    }
+                );
+            }
+        });
+
+        // ==========================================
+        // Emit Logic
+        // ==========================================
+        function safeEmit(event, data) {
+            if (connectionType === 'wifi' && socket && socket.connected) {
+                socket.emit(event, data);
+            } else if (connectionType === 'bt' && window.bluetoothSerial) {
+                const payload = { event: event, data: data };
+                const message = JSON.stringify(payload) + '\n';
+                bluetoothSerial.write(message);
+            }
+        }
+
+        // ==========================================
+        // UI Interaction Logic
+        // ==========================================
         const trackpad = document.getElementById('trackpad');
         let lastTouchX = null;
         let lastTouchY = null;
         let isMoving = false;
 
-        // Sensitivity multiplier
         const SENSITIVITY = 1.5;
 
         trackpad.addEventListener('touchstart', (e) => {
@@ -153,7 +474,7 @@
                 const dy = (currentY - lastTouchY) * SENSITIVITY;
 
                 if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
-                    socket.emit('mouse_move', { dx: dx, dy: dy });
+                    safeEmit('mouse_move', { dx: dx, dy: dy });
                 }
 
                 lastTouchX = currentX;
@@ -168,17 +489,13 @@
             lastTouchY = null;
         }, { passive: false });
 
-        // Tap to click
         let lastTap = 0;
         trackpad.addEventListener('touchend', (e) => {
             const currentTime = new Date().getTime();
             const tapLength = currentTime - lastTap;
 
-            // If it was a quick tap without much movement, treat as left click
             if (tapLength < 250 && tapLength > 0) {
-                // Double tap? We can just send click.
-                // Single tap is also a click if we didn't move much (this needs a small movement threshold in a real app, but for simplicity we keep it simple)
-                socket.emit('mouse_click', { button: 'left', action: 'click' });
+                safeEmit('mouse_click', { button: 'left', action: 'click' });
             }
             lastTap = currentTime;
         });
@@ -200,16 +517,12 @@
             e.preventDefault();
             if (isScrolling && e.touches.length === 1) {
                 const currentY = e.touches[0].clientY;
-                // For pynput scroll, positive dy is usually up, negative is down.
-                // Touch move down means we want to scroll up the page (natural scrolling).
-                // Or standard scrolling: move finger down -> content goes down -> scroll wheel down (negative).
                 const dy = lastScrollY - currentY;
 
-                // Scale it down so it's not too fast
                 const scrollSteps = dy * 0.1;
 
                 if (Math.abs(scrollSteps) >= 1) {
-                    socket.emit('mouse_scroll', { dx: 0, dy: Math.sign(scrollSteps) });
+                    safeEmit('mouse_scroll', { dx: 0, dy: Math.sign(scrollSteps) });
                     lastScrollY = currentY;
                 }
             }
@@ -223,36 +536,30 @@
 
         // Buttons
         document.getElementById('left-click').addEventListener('click', () => {
-            socket.emit('mouse_click', { button: 'left', action: 'click' });
+            safeEmit('mouse_click', { button: 'left', action: 'click' });
         });
 
         document.getElementById('middle-click').addEventListener('click', () => {
-            socket.emit('mouse_click', { button: 'middle', action: 'click' });
+            safeEmit('mouse_click', { button: 'middle', action: 'click' });
         });
 
         document.getElementById('right-click').addEventListener('click', () => {
-            socket.emit('mouse_click', { button: 'right', action: 'click' });
+            safeEmit('mouse_click', { button: 'right', action: 'click' });
         });
 
         // Keyboard Input
         const keyboardInput = document.getElementById('keyboard-input');
 
-        // Capture keydown to send special keys and normal keys
         keyboardInput.addEventListener('keydown', (e) => {
-            // We want to send the exact key
-            socket.emit('key_press', { key: e.key });
+            safeEmit('key_press', { key: e.key });
 
-            // Prevent default for some keys to avoid navigating away, etc.
-            // But let input happen so mobile keyboard stays open
             if (e.key === 'Enter' || e.key === 'Backspace') {
-                // Clear input so it doesn't get infinitely long
                 setTimeout(() => {
                     keyboardInput.value = '';
                 }, 10);
             }
         });
 
-        // Clear input periodically to avoid huge strings
         keyboardInput.addEventListener('input', (e) => {
             if (keyboardInput.value.length > 20) {
                 keyboardInput.value = keyboardInput.value.substring(keyboardInput.value.length - 5);
