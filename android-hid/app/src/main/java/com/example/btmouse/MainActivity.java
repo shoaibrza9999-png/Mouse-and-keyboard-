@@ -6,7 +6,6 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothHidDevice;
 import android.bluetooth.BluetoothHidDeviceAppSdpSettings;
-import android.bluetooth.BluetoothHidDeviceAppQosSettings;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.content.Context;
@@ -22,9 +21,13 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
@@ -40,6 +43,7 @@ public class MainActivity extends AppCompatActivity {
     private View trackpad;
     private Button leftClickBtn;
     private Button rightClickBtn;
+    private Button connectBtn;
     private Button disconnectBtn;
 
     // Standard Mouse HID Report Descriptor
@@ -81,6 +85,7 @@ public class MainActivity extends AppCompatActivity {
         trackpad = findViewById(R.id.trackpad);
         leftClickBtn = findViewById(R.id.btn_left_click);
         rightClickBtn = findViewById(R.id.btn_right_click);
+        connectBtn = findViewById(R.id.btn_connect);
         disconnectBtn = findViewById(R.id.btn_disconnect);
 
         BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
@@ -94,6 +99,7 @@ public class MainActivity extends AppCompatActivity {
 
         checkPermissionsAndInit();
 
+        connectBtn.setOnClickListener(v -> showPairedDevicesDialog());
         disconnectBtn.setOnClickListener(v -> disconnect());
         setupTrackpad();
         setupButtons();
@@ -178,7 +184,8 @@ public class MainActivity extends AppCompatActivity {
             Log.d(TAG, "App registered: " + registered);
             runOnUiThread(() -> {
                 if (registered) {
-                    statusText.setText("Ready to pair! Go to your PC's Bluetooth settings and pair with this phone.");
+                    statusText.setText("Ready! You can now pair or connect to a PC.");
+                    connectBtn.setVisibility(View.VISIBLE);
                 } else {
                     statusText.setText("App Registration Failed");
                 }
@@ -192,10 +199,12 @@ public class MainActivity extends AppCompatActivity {
                 if (state == BluetoothProfile.STATE_CONNECTED) {
                     connectedHost = device;
                     statusText.setText("Connected to: " + getDeviceNameSafe(device));
+                    connectBtn.setVisibility(View.GONE);
                     disconnectBtn.setVisibility(View.VISIBLE);
                 } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
                     connectedHost = null;
-                    statusText.setText("Disconnected. Waiting for connection...");
+                    statusText.setText("Disconnected. Ready to connect.");
+                    connectBtn.setVisibility(View.VISIBLE);
                     disconnectBtn.setVisibility(View.GONE);
                 }
             });
@@ -203,9 +212,44 @@ public class MainActivity extends AppCompatActivity {
     };
 
     @SuppressLint("MissingPermission")
+    private void showPairedDevicesDialog() {
+        Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
+        if (pairedDevices == null || pairedDevices.isEmpty()) {
+            Toast.makeText(this, "No paired devices found. Pair with your PC first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        List<String> deviceNames = new ArrayList<>();
+        List<BluetoothDevice> deviceList = new ArrayList<>();
+
+        for (BluetoothDevice device : pairedDevices) {
+            deviceNames.add(getDeviceNameSafe(device) + "\n" + device.getAddress());
+            deviceList.add(device);
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Select PC to connect");
+        builder.setItems(deviceNames.toArray(new CharSequence[0]), (dialog, which) -> {
+            BluetoothDevice selectedDevice = deviceList.get(which);
+            connectToDevice(selectedDevice);
+        });
+        builder.setNegativeButton("Cancel", null);
+        builder.show();
+    }
+
+    @SuppressLint("MissingPermission")
+    private void connectToDevice(BluetoothDevice device) {
+        if (hidDevice != null) {
+            statusText.setText("Connecting to " + getDeviceNameSafe(device) + "...");
+            hidDevice.connect(device);
+        }
+    }
+
+    @SuppressLint("MissingPermission")
     private String getDeviceNameSafe(BluetoothDevice device) {
         try {
-            return device.getName();
+            String name = device.getName();
+            return name != null ? name : "Unknown Device";
         } catch (Exception e) {
             return device.getAddress();
         }
