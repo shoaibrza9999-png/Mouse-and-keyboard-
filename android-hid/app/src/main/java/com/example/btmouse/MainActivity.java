@@ -10,6 +10,7 @@ import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -54,36 +55,80 @@ public class MainActivity extends AppCompatActivity {
     private Button connectBtn;
     private Button disconnectBtn;
 
-    // Standard Mouse HID Report Descriptor with Report ID
-    private static final byte[] MOUSE_REPORT_DESC = {
-            0x05, 0x01, // Usage Page (Generic Desktop)
-            0x09, 0x02, // Usage (Mouse)
-            (byte) 0xA1, 0x01, // Collection (Application)
-            (byte) 0x85, 0x01, // Report ID (1)
-            0x09, 0x01, // Usage (Pointer)
-            (byte) 0xA1, 0x00, // Collection (Physical)
-            0x05, 0x09, // Usage Page (Button)
-            0x19, 0x01, // Usage Minimum (1)
-            0x29, 0x03, // Usage Maximum (3)
-            0x15, 0x00, // Logical Minimum (0)
-            0x25, 0x01, // Logical Maximum (1)
-            (byte) 0x95, 0x03, // Report Count (3)
-            0x75, 0x01, // Report Size (1)
-            (byte) 0x81, 0x02, // Input (Data, Variable, Absolute)
-            (byte) 0x95, 0x01, // Report Count (1)
-            0x75, 0x05, // Report Size (5)
-            (byte) 0x81, 0x03, // Input (Constant, Variable, Absolute) - padding
-            0x05, 0x01, // Usage Page (Generic Desktop)
-            0x09, 0x30, // Usage (X)
-            0x09, 0x31, // Usage (Y)
-            0x09, 0x38, // Usage (Wheel)
-            0x15, (byte) 0x81, // Logical Minimum (-127)
-            0x25, 0x7F, // Logical Maximum (127)
-            0x75, 0x08, // Report Size (8)
-            (byte) 0x95, 0x03, // Report Count (3) - X, Y, and Wheel
-            (byte) 0x81, 0x06, // Input (Data, Variable, Relative)
-            (byte) 0xC0, // End Collection
-            (byte) 0xC0  // End Collection
+    // Report IDs
+    private static final int ID_KEYBOARD = 1;
+    private static final int ID_MOUSE = 2;
+
+    // Combo Keyboard + Mouse HID Report Descriptor
+    private static final byte[] COMBO_REPORT_DESC = {
+        // -------------------------------------------------
+        // Keyboard Report (ID 1)
+        // -------------------------------------------------
+        0x05, 0x01,                         // Usage Page (Generic Desktop)
+        0x09, 0x06,                         // Usage (Keyboard)
+        (byte) 0xA1, 0x01,                  // Collection (Application)
+        (byte) 0x85, ID_KEYBOARD,           //   Report ID (1)
+        0x05, 0x07,                         //   Usage Page (Key Codes)
+        0x19, (byte) 0xe0,                  //   Usage Minimum (224)
+        0x29, (byte) 0xe7,                  //   Usage Maximum (231)
+        0x15, 0x00,                         //   Logical Minimum (0)
+        0x25, 0x01,                         //   Logical Maximum (1)
+        0x75, 0x01,                         //   Report Size (1)
+        (byte) 0x95, 0x08,                  //   Report Count (8)
+        (byte) 0x81, 0x02,                  //   Input (Data, Variable, Absolute)
+        (byte) 0x95, 0x01,                  //   Report Count (1)
+        0x75, 0x08,                         //   Report Size (8)
+        (byte) 0x81, 0x01,                  //   Input (Constant) reserved byte(1)
+        (byte) 0x95, 0x05,                  //   Report Count (5)
+        0x75, 0x01,                         //   Report Size (1)
+        0x05, 0x08,                         //   Usage Page (Page# for LEDs)
+        0x19, 0x01,                         //   Usage Minimum (1)
+        0x29, 0x05,                         //   Usage Maximum (5)
+        (byte) 0x91, 0x02,                  //   Output (Data, Variable, Absolute), Led report
+        (byte) 0x95, 0x01,                  //   Report Count (1)
+        0x75, 0x03,                         //   Report Size (3)
+        (byte) 0x91, 0x01,                  //   Output (Data, Variable, Absolute), Led report padding
+        (byte) 0x95, 0x06,                  //   Report Count (6)
+        0x75, 0x08,                         //   Report Size (8)
+        0x15, 0x00,                         //   Logical Minimum (0)
+        0x25, 0x65,                         //   Logical Maximum (101)
+        0x05, 0x07,                         //   Usage Page (Key codes)
+        0x19, 0x00,                         //   Usage Minimum (0)
+        0x29, 0x65,                         //   Usage Maximum (101)
+        (byte) 0x81, 0x00,                  //   Input (Data, Array) Key array(6 bytes)
+        (byte) 0xC0,                        // End Collection
+
+        // -------------------------------------------------
+        // Mouse Report (ID 2)
+        // -------------------------------------------------
+        0x05, 0x01,                         // Usage Page (Generic Desktop)
+        0x09, 0x02,                         // Usage (Mouse)
+        (byte) 0xA1, 0x01,                  // Collection (Application)
+        (byte) 0x85, ID_MOUSE,              //   Report ID (2)
+        0x09, 0x01,                         //   Usage (Pointer)
+        (byte) 0xA1, 0x00,                  //   Collection (Physical)
+        0x05, 0x09,                         //     Usage Page (Button)
+        0x19, 0x01,                         //     Usage Minimum (1)
+        0x29, 0x03,                         //     Usage Maximum (3)
+        0x15, 0x00,                         //     Logical Minimum (0)
+        0x25, 0x01,                         //     Logical Maximum (1)
+        (byte) 0x95, 0x03,                  //     Report Count (3)
+        0x75, 0x01,                         //     Report Size (1)
+        (byte) 0x81, 0x02,                  //     Input (Data, Variable, Absolute)
+        (byte) 0x95, 0x01,                  //     Report Count (1)
+        0x75, 0x05,                         //     Report Size (5)
+        (byte) 0x81, 0x03,                  //     Input (Constant, Variable, Absolute) - padding
+        0x05, 0x01,                         //     Usage Page (Generic Desktop)
+        0x09, 0x30,                         //     Usage (X)
+        0x09, 0x31,                         //     Usage (Y)
+        0x09, 0x38,                         //     Usage (Wheel)
+        0x15, (byte) 0x81,                  //     Logical Minimum (-127)
+        0x25, 0x7F,                         //     Logical Maximum (127)
+        0x75, 0x08,                         //     Report Size (8)
+        (byte) 0x95, 0x03,                  //     Report Count (3)
+        (byte) 0x81, 0x06,                  //     Input (Data, Variable, Relative)
+        (byte) 0xC0,                        //   End Collection
+        (byte) 0xC0                         // End Collection
     };
 
     @Override
@@ -101,6 +146,20 @@ public class MainActivity extends AppCompatActivity {
         disconnectBtn = findViewById(R.id.btn_disconnect);
 
         addLog("App started");
+
+        // Show warning about unpairing if this is the first run after updating
+        SharedPreferences prefs = getSharedPreferences("BtMousePrefs", MODE_PRIVATE);
+        boolean isUpdated = prefs.getBoolean("isComboUpdated", false);
+        if (!isUpdated) {
+            new AlertDialog.Builder(this)
+                .setTitle("Important Update!")
+                .setMessage("The Bluetooth Profile has been updated to fix clicking and scrolling bugs.\n\nYou MUST un-pair/forget this phone from your PC's Bluetooth settings, and pair it again! If you don't un-pair, your PC will remember the old buggy profile.")
+                .setPositiveButton("I Understand", (dialog, which) -> {
+                    prefs.edit().putBoolean("isComboUpdated", true).apply();
+                })
+                .setCancelable(false)
+                .show();
+        }
 
         BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
         bluetoothAdapter = bluetoothManager.getAdapter();
@@ -203,8 +262,8 @@ public class MainActivity extends AppCompatActivity {
                 "BT Mouse",
                 "Virtual Mouse",
                 "Google",
-                BluetoothHidDevice.SUBCLASS1_MOUSE,
-                MOUSE_REPORT_DESC
+                (byte) 0xC0, // SUBCLASS1_COMBO (Keyboard + Mouse)
+                COMBO_REPORT_DESC
         );
 
         boolean success = hidDevice.registerApp(
@@ -324,8 +383,13 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private float lastX, lastY;
     private int currentButtons = 0; // State of the buttons
+
+    // Multi-touch tracking
+    private int primaryPointerId = -1;
+    private float lastX, lastY;
+    private boolean isScrolling = false;
+    private float scrollStartY;
 
     @SuppressLint("ClickableViewAccessibility")
     private void setupTrackpad() {
@@ -333,21 +397,69 @@ public class MainActivity extends AppCompatActivity {
             if (connectedHost == null || hidDevice == null) return true;
 
             int action = event.getActionMasked();
+
             switch (action) {
                 case MotionEvent.ACTION_DOWN:
-                    lastX = event.getX();
-                    lastY = event.getY();
+                    // First finger down
+                    primaryPointerId = event.getPointerId(0);
+                    lastX = event.getX(0);
+                    lastY = event.getY(0);
+                    isScrolling = false;
                     break;
+
+                case MotionEvent.ACTION_POINTER_DOWN:
+                    // Second finger down - initiate scroll mode
+                    if (event.getPointerCount() == 2) {
+                        isScrolling = true;
+                        scrollStartY = event.getY(0); // Use first finger for scroll tracking
+                    }
+                    break;
+
+                case MotionEvent.ACTION_POINTER_UP:
+                    // Finger lifted
+                    if (event.getPointerCount() == 2) {
+                        isScrolling = false; // Transitioning back to 1 finger
+                        // The remaining finger becomes the new primary pointer
+                        int upIndex = event.getActionIndex();
+                        int remainingIndex = upIndex == 0 ? 1 : 0;
+                        primaryPointerId = event.getPointerId(remainingIndex);
+                        lastX = event.getX(remainingIndex);
+                        lastY = event.getY(remainingIndex);
+                    }
+                    break;
+
                 case MotionEvent.ACTION_MOVE:
-                    float dx = event.getX() - lastX;
-                    float dy = event.getY() - lastY;
-                    sendMouseReport(currentButtons, (int) (dx * 1.5), (int) (dy * 1.5), 0);
-                    lastX = event.getX();
-                    lastY = event.getY();
+                    if (isScrolling) {
+                        // 2-finger scroll
+                        float currentY = event.getY(0);
+                        float dy = currentY - scrollStartY;
+
+                        // Send scroll report if moved enough
+                        if (Math.abs(dy) > 10) {
+                            int scrollDir = (dy > 0) ? -1 : 1; // Natural scrolling
+                            sendMouseReport(currentButtons, 0, 0, scrollDir);
+                            scrollStartY = currentY; // Reset threshold
+                        }
+                    } else {
+                        // 1-finger move
+                        int pointerIndex = event.findPointerIndex(primaryPointerId);
+                        if (pointerIndex != -1) {
+                            float dx = event.getX(pointerIndex) - lastX;
+                            float dy = event.getY(pointerIndex) - lastY;
+
+                            // Send move report
+                            sendMouseReport(currentButtons, (int) (dx * 1.5), (int) (dy * 1.5), 0);
+
+                            lastX = event.getX(pointerIndex);
+                            lastY = event.getY(pointerIndex);
+                        }
+                    }
                     break;
+
                 case MotionEvent.ACTION_UP:
-                    lastX = 0;
-                    lastY = 0;
+                case MotionEvent.ACTION_CANCEL:
+                    primaryPointerId = -1;
+                    isScrolling = false;
                     break;
             }
             return true;
@@ -389,11 +501,11 @@ public class MainActivity extends AppCompatActivity {
         byte bWheel = (byte) Math.max(-127, Math.min(127, dWheel));
         byte bBtns = (byte) buttons;
 
-        // The payload now consists of 4 bytes: [Buttons, X, Y, Wheel]
+        // The payload for the mouse consists of 4 bytes: [Buttons, X, Y, Wheel]
         byte[] report = new byte[]{bBtns, bDx, bDy, bWheel};
 
-        // Report ID is 1 (matches 0x85, 0x01 in descriptor)
-        boolean success = hidDevice.sendReport(connectedHost, 1, report);
+        // Use ID_MOUSE (2)
+        boolean success = hidDevice.sendReport(connectedHost, ID_MOUSE, report);
         if (!success) {
             // Uncomment to debug if reports are failing to send
             // Log.e(TAG, "Failed to send report");
