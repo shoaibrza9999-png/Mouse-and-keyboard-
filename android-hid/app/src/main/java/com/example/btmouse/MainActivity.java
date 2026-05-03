@@ -17,6 +17,7 @@ import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.Button;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -25,8 +26,11 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.Executors;
 
@@ -39,7 +43,11 @@ public class MainActivity extends AppCompatActivity {
     private BluetoothHidDevice hidDevice;
     private BluetoothDevice connectedHost;
 
+    private boolean isRegistered = false;
+
     private TextView statusText;
+    private TextView logText;
+    private ScrollView logScrollView;
     private View trackpad;
     private Button leftClickBtn;
     private Button rightClickBtn;
@@ -82,16 +90,21 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         statusText = findViewById(R.id.status_text);
+        logText = findViewById(R.id.log_text);
+        logScrollView = findViewById(R.id.log_scrollview);
         trackpad = findViewById(R.id.trackpad);
         leftClickBtn = findViewById(R.id.btn_left_click);
         rightClickBtn = findViewById(R.id.btn_right_click);
         connectBtn = findViewById(R.id.btn_connect);
         disconnectBtn = findViewById(R.id.btn_disconnect);
 
+        addLog("App started");
+
         BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
         bluetoothAdapter = bluetoothManager.getAdapter();
 
         if (bluetoothAdapter == null) {
+            addLog("ERROR: Bluetooth not supported on this device.");
             Toast.makeText(this, "Bluetooth not supported", Toast.LENGTH_SHORT).show();
             finish();
             return;
@@ -99,15 +112,25 @@ public class MainActivity extends AppCompatActivity {
 
         checkPermissionsAndInit();
 
-        connectBtn.setOnClickListener(v -> showPairedDevicesDialog());
+        connectBtn.setOnClickListener(v -> handleConnectClick());
         disconnectBtn.setOnClickListener(v -> disconnect());
         setupTrackpad();
         setupButtons();
     }
 
+    private void addLog(String msg) {
+        Log.d(TAG, msg);
+        runOnUiThread(() -> {
+            String time = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date());
+            logText.append("[" + time + "] " + msg + "\n");
+            logScrollView.post(() -> logScrollView.fullScroll(View.FOCUS_DOWN));
+        });
+    }
+
     private void checkPermissionsAndInit() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                addLog("Requesting Bluetooth permissions...");
                 ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE}, REQUEST_BLUETOOTH_PERMISSIONS);
                 return;
             }
@@ -120,8 +143,10 @@ public class MainActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_BLUETOOTH_PERMISSIONS) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                addLog("Bluetooth permissions granted.");
                 initHidDevice();
             } else {
+                addLog("ERROR: Bluetooth permissions denied.");
                 Toast.makeText(this, "Bluetooth permissions required", Toast.LENGTH_SHORT).show();
             }
         }
@@ -130,19 +155,21 @@ public class MainActivity extends AppCompatActivity {
     @SuppressLint("MissingPermission")
     private void initHidDevice() {
         if (!bluetoothAdapter.isEnabled()) {
+            addLog("Bluetooth is disabled, requesting to enable...");
             Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
             startActivityForResult(enableBtIntent, 2);
             return;
         }
 
+        addLog("Getting HID Device profile proxy...");
         statusText.setText("Initializing HID Profile...");
 
-        bluetoothAdapter.getProfileProxy(this, new BluetoothProfile.ServiceListener() {
+        boolean success = bluetoothAdapter.getProfileProxy(this, new BluetoothProfile.ServiceListener() {
             @Override
             public void onServiceConnected(int profile, BluetoothProfile proxy) {
                 if (profile == BluetoothProfile.HID_DEVICE) {
                     hidDevice = (BluetoothHidDevice) proxy;
-                    Log.d(TAG, "HID Device proxy connected");
+                    addLog("HID Device proxy connected.");
                     registerApp();
                 }
             }
@@ -151,16 +178,25 @@ public class MainActivity extends AppCompatActivity {
             public void onServiceDisconnected(int profile) {
                 if (profile == BluetoothProfile.HID_DEVICE) {
                     hidDevice = null;
-                    Log.d(TAG, "HID Device proxy disconnected");
+                    isRegistered = false;
+                    addLog("HID Device proxy disconnected.");
                 }
             }
         }, BluetoothProfile.HID_DEVICE);
+
+        if (!success) {
+            addLog("ERROR: Failed to get HID profile proxy. Device may not support it.");
+        }
     }
 
     @SuppressLint("MissingPermission")
     private void registerApp() {
-        if (hidDevice == null) return;
+        if (hidDevice == null) {
+            addLog("ERROR: Cannot register app, HID proxy is null.");
+            return;
+        }
 
+        addLog("Registering HID App...");
         BluetoothHidDeviceAppSdpSettings sdpSettings = new BluetoothHidDeviceAppSdpSettings(
                 "BT Mouse",
                 "Virtual Mouse",
@@ -169,23 +205,27 @@ public class MainActivity extends AppCompatActivity {
                 MOUSE_REPORT_DESC
         );
 
-        hidDevice.registerApp(
+        boolean success = hidDevice.registerApp(
                 sdpSettings,
                 null,
                 null,
                 Executors.newSingleThreadExecutor(),
                 hidCallback
         );
+
+        if (!success) {
+            addLog("ERROR: registerApp() returned false.");
+        }
     }
 
     private final BluetoothHidDevice.Callback hidCallback = new BluetoothHidDevice.Callback() {
         @Override
         public void onAppStatusChanged(BluetoothDevice pluggedDevice, boolean registered) {
-            Log.d(TAG, "App registered: " + registered);
+            addLog("App registration status changed: " + registered);
+            isRegistered = registered;
             runOnUiThread(() -> {
                 if (registered) {
-                    statusText.setText("Ready! You can now pair or connect to a PC.");
-                    connectBtn.setVisibility(View.VISIBLE);
+                    statusText.setText("Ready! You can now connect to a PC.");
                 } else {
                     statusText.setText("App Registration Failed");
                 }
@@ -194,15 +234,18 @@ public class MainActivity extends AppCompatActivity {
 
         @Override
         public void onConnectionStateChanged(BluetoothDevice device, int state) {
-            Log.d(TAG, "Connection state: " + state);
+            addLog("Connection state changed: " + state);
             runOnUiThread(() -> {
                 if (state == BluetoothProfile.STATE_CONNECTED) {
                     connectedHost = device;
-                    statusText.setText("Connected to: " + getDeviceNameSafe(device));
+                    String name = getDeviceNameSafe(device);
+                    addLog("Successfully connected to: " + name);
+                    statusText.setText("Connected to: " + name);
                     connectBtn.setVisibility(View.GONE);
                     disconnectBtn.setVisibility(View.VISIBLE);
                 } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
                     connectedHost = null;
+                    addLog("Disconnected.");
                     statusText.setText("Disconnected. Ready to connect.");
                     connectBtn.setVisibility(View.VISIBLE);
                     disconnectBtn.setVisibility(View.GONE);
@@ -211,10 +254,21 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    private void handleConnectClick() {
+        if (hidDevice == null || !isRegistered) {
+            addLog("Attempting to re-initialize HID profile...");
+            initHidDevice();
+            Toast.makeText(this, "Initializing Bluetooth Profile, please wait and try again.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        showPairedDevicesDialog();
+    }
+
     @SuppressLint("MissingPermission")
     private void showPairedDevicesDialog() {
         Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
         if (pairedDevices == null || pairedDevices.isEmpty()) {
+            addLog("No paired devices found.");
             Toast.makeText(this, "No paired devices found. Pair with your PC first.", Toast.LENGTH_LONG).show();
             return;
         }
@@ -240,8 +294,13 @@ public class MainActivity extends AppCompatActivity {
     @SuppressLint("MissingPermission")
     private void connectToDevice(BluetoothDevice device) {
         if (hidDevice != null) {
-            statusText.setText("Connecting to " + getDeviceNameSafe(device) + "...");
-            hidDevice.connect(device);
+            String name = getDeviceNameSafe(device);
+            addLog("Initiating connection to " + name + "...");
+            statusText.setText("Connecting to " + name + "...");
+            boolean success = hidDevice.connect(device);
+            if (!success) {
+                addLog("ERROR: hidDevice.connect() returned false.");
+            }
         }
     }
 
@@ -258,6 +317,7 @@ public class MainActivity extends AppCompatActivity {
     @SuppressLint("MissingPermission")
     private void disconnect() {
         if (hidDevice != null && connectedHost != null) {
+            addLog("Disconnecting from " + getDeviceNameSafe(connectedHost) + "...");
             hidDevice.disconnect(connectedHost);
         }
     }
