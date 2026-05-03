@@ -54,11 +54,12 @@ public class MainActivity extends AppCompatActivity {
     private Button connectBtn;
     private Button disconnectBtn;
 
-    // Standard Mouse HID Report Descriptor
+    // Standard Mouse HID Report Descriptor with Report ID
     private static final byte[] MOUSE_REPORT_DESC = {
             0x05, 0x01, // Usage Page (Generic Desktop)
             0x09, 0x02, // Usage (Mouse)
             (byte) 0xA1, 0x01, // Collection (Application)
+            (byte) 0x85, 0x01, // Report ID (1)
             0x09, 0x01, // Usage (Pointer)
             (byte) 0xA1, 0x00, // Collection (Physical)
             0x05, 0x09, // Usage Page (Button)
@@ -75,10 +76,11 @@ public class MainActivity extends AppCompatActivity {
             0x05, 0x01, // Usage Page (Generic Desktop)
             0x09, 0x30, // Usage (X)
             0x09, 0x31, // Usage (Y)
+            0x09, 0x38, // Usage (Wheel)
             0x15, (byte) 0x81, // Logical Minimum (-127)
             0x25, 0x7F, // Logical Maximum (127)
             0x75, 0x08, // Report Size (8)
-            (byte) 0x95, 0x02, // Report Count (2)
+            (byte) 0x95, 0x03, // Report Count (3) - X, Y, and Wheel
             (byte) 0x81, 0x06, // Input (Data, Variable, Relative)
             (byte) 0xC0, // End Collection
             (byte) 0xC0  // End Collection
@@ -323,6 +325,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private float lastX, lastY;
+    private int currentButtons = 0; // State of the buttons
 
     @SuppressLint("ClickableViewAccessibility")
     private void setupTrackpad() {
@@ -338,7 +341,7 @@ public class MainActivity extends AppCompatActivity {
                 case MotionEvent.ACTION_MOVE:
                     float dx = event.getX() - lastX;
                     float dy = event.getY() - lastY;
-                    sendMouseReport(0, (int) (dx * 1.5), (int) (dy * 1.5));
+                    sendMouseReport(currentButtons, (int) (dx * 1.5), (int) (dy * 1.5), 0);
                     lastX = event.getX();
                     lastY = event.getY();
                     break;
@@ -355,33 +358,45 @@ public class MainActivity extends AppCompatActivity {
     private void setupButtons() {
         leftClickBtn.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                sendMouseReport(1, 0, 0); // Left click press
+                currentButtons |= 1; // Set bit 0
+                sendMouseReport(currentButtons, 0, 0, 0);
             } else if (event.getAction() == MotionEvent.ACTION_UP) {
-                sendMouseReport(0, 0, 0); // Release
+                currentButtons &= ~1; // Clear bit 0
+                sendMouseReport(currentButtons, 0, 0, 0);
             }
             return true;
         });
 
         rightClickBtn.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                sendMouseReport(2, 0, 0); // Right click press
+                currentButtons |= 2; // Set bit 1
+                sendMouseReport(currentButtons, 0, 0, 0);
             } else if (event.getAction() == MotionEvent.ACTION_UP) {
-                sendMouseReport(0, 0, 0); // Release
+                currentButtons &= ~2; // Clear bit 1
+                sendMouseReport(currentButtons, 0, 0, 0);
             }
             return true;
         });
     }
 
     @SuppressLint("MissingPermission")
-    private void sendMouseReport(int buttons, int dx, int dy) {
+    private void sendMouseReport(int buttons, int dx, int dy, int dWheel) {
         if (hidDevice == null || connectedHost == null) return;
 
-        // Ensure deltas are within byte limits (-127 to 127)
+        // Ensure deltas are within signed byte limits (-127 to 127)
         byte bDx = (byte) Math.max(-127, Math.min(127, dx));
         byte bDy = (byte) Math.max(-127, Math.min(127, dy));
+        byte bWheel = (byte) Math.max(-127, Math.min(127, dWheel));
         byte bBtns = (byte) buttons;
 
-        byte[] report = new byte[]{bBtns, bDx, bDy};
-        hidDevice.sendReport(connectedHost, 0, report);
+        // The payload now consists of 4 bytes: [Buttons, X, Y, Wheel]
+        byte[] report = new byte[]{bBtns, bDx, bDy, bWheel};
+
+        // Report ID is 1 (matches 0x85, 0x01 in descriptor)
+        boolean success = hidDevice.sendReport(connectedHost, 1, report);
+        if (!success) {
+            // Uncomment to debug if reports are failing to send
+            // Log.e(TAG, "Failed to send report");
+        }
     }
 }
